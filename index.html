@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<h1>Sudoku Webserver</h1>
+<p>Pagina prodotta da Raspberry Pi Pico 2 W.</p>
+<p>Data e orario: <span id="datetime"></span></p>
+<p>Per inserire schema: http://your_pico_ip/upload</p>
+<script>
+    const now = new Date();
+    document.getElementById('datetime').textContent =
+        now.toLocaleString();
+</script>
+</body>
+
+</html>

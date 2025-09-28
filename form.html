@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Form Demo</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .title {
+      font-family: Arial, sans-serif; /* Specify font */
+      font-weight: bold;             /* Make it bold */
+      color: #2c3e50;               /* Specify color */
+    }
+    form {
+      display: flex;
+      flex-flow: column nowrap;
+      align-items: flex-start; /* Align labels to the left */
+      gap: 5px; /* Add space between rows */
+    }
+  </style>
+</head>
+
+<body>
+
+<h1 class="title">Sudoku</h1>
+<p>Inserire lo schema nelle righe sotto secondo la notazione di esempio: 5,3,_,_,7,_,_,_,_</p>
+
+<form method="post" action="/upload">
+  <label>riga 1: <input name="row_1" type="text"></label>
+  <label>riga 2: <input name="row_2" type="text"></label>
+  <label>riga 3: <input name="row_3" type="text"></label>
+  <label>riga 4: <input name="row_4" type="text"></label>
+  <label>riga 5: <input name="row_5" type="text"></label>
+  <label>riga 6: <input name="row_6" type="text"></label>
+  <label>riga 7: <input name="row_7" type="text"></label>
+  <label>riga 8: <input name="row_8" type="text"></label>
+  <label>riga 9: <input name="row_9" type="text"></label>
+  <input type="submit">
+</form>
+
+</body>
+
+</html>
