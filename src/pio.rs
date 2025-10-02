@@ -1,8 +1,8 @@
-use fixed::traits::ToFixed;
-use fixed_macro::types::U56F8;
 use embassy_rp::peripherals::PIO1;
 use embassy_rp::pio::program::pio_asm;
 use embassy_rp::pio::{Common, Config, Irq, StateMachine};
+use fixed::traits::ToFixed;
+use fixed_macro::types::U56F8;
 pub fn setup_pio_task_sm2<'a>(pio: &mut Common<'a, PIO1>, sm: &mut StateMachine<'a, PIO1, 2>) {
     // Setup sm2
 

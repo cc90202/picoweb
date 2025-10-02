@@ -16,10 +16,13 @@ mod configuration;
 mod sudoku;
 #[macro_use]
 mod utility;
-mod pio;
+mod app_props;
+mod app_state;
 mod form_value;
+mod pio;
 
-
+use crate::app_props::AppProps;
+use crate::app_state::AppState;
 use cyw43::{Control, JoinOptions};
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::*;
@@ -37,11 +40,9 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Ticker, Timer};
 use panic_persist as _;
-use picoserve::routing::{PathRouter, get_service};
 use picoserve::{AppRouter, AppWithStateBuilder, make_static};
 use static_cell::StaticCell;
 use utility::*;
-use crate::form_value::FormValue;
 
 const WEB_TASK_POOL_SIZE: usize = 10;
 const ELAPSED_SECS: u64 = 60;
@@ -76,69 +77,9 @@ bind_interrupts!(struct IrqPIO1 {
     PIO1_IRQ_0 => InterruptHandler<PIO1>;
 });
 
-
-
-
-
-
-
 /// Struttura per condividere il controller tra task embassy diversi
 #[derive(Clone, Copy)]
 struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static>>);
-
-/// Stato dell'applicazione condifiviso tra i task embassy
-struct AppState {
-    shared_control: SharedControl,
-}
-
-// Permette di estrarre il controller condiviso dallo stato dell'applicazione
-impl picoserve::extract::FromRef<AppState> for SharedControl {
-    /// Ritorna il controller condiviso
-    ///
-    /// # Argomenti
-    /// * `state` - Riferimento allo stato dell'applicazione
-    ///
-    /// # Ritorna
-    /// * Self - Controller condiviso
-    fn from_ref(state: &AppState) -> Self {
-        state.shared_control
-    }
-}
-
-struct AppProps;
-
-// Costruisce il router dell'applicazione con le rotte definite
-impl AppWithStateBuilder for AppProps {
-    type State = AppState;
-    type PathRouter = impl PathRouter<AppState>;
-
-    /// Costruisce il router dell'applicazione con gli endpoint.
-    ///
-    /// # Ritorna
-    /// * picoserve::Router<Self::PathRouter, Self::State>
-    fn build_app(self) -> picoserve::Router<Self::PathRouter, Self::State> {
-        picoserve::Router::new()
-            .route(
-                "/",
-                get_service(picoserve::response::File::html(include_str!(
-                    "../index.html"
-                ))),
-            )
-            .route(
-                "/upload",
-                get_service(picoserve::response::File::html(include_str!(
-                    "../form.html"
-                )))
-                .post(
-                    |picoserve::extract::Form(form_value): picoserve::extract::Form<FormValue>| {
-                        async move {
-                            form_value // magia grazie al trait Content ridefinito sopra
-                        }
-                    },
-                ),
-            )
-    }
-}
 
 /// Entry point principale secondo Embassy
 #[embassy_executor::main]
@@ -168,7 +109,7 @@ async fn main(spawner: Spawner) {
 
     let pwr = Output::new(p.PIN_23, Level::Low);
     let cs = Output::new(p.PIN_25, Level::High);
-    let mut pio = Pio::new(p.PIO0, Irqs);       // <---- PIO0 for SPI communication
+    let mut pio = Pio::new(p.PIO0, Irqs); // <---- PIO0 for SPI communication
     let spi = PioSpi::new(
         &mut pio.common,
         pio.sm0,
@@ -193,7 +134,8 @@ async fn main(spawner: Spawner) {
     // PIO1 per un timer di esempio ad altissima precisione che genera un interrupt
     // e viene gestito dal PIO senza passare da CPU.
     let pio1 = p.PIO1;
-    let Pio {   // destrutturazione per prendere solo quello che serve
+    let Pio {
+        // destrutturazione per prendere solo quello che serve
         mut common,
         irq3,
         mut sm2,
@@ -217,7 +159,6 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(reader(uart_rx)); //<---- 3
     panic_led_loop!(control);
 
-
     // Genera un random seed per il network stack
     let seed: u64 = RoscRng.next_u64();
     log::info!("Random seed value seeded to {}", seed);
@@ -232,7 +173,9 @@ async fn main(spawner: Spawner) {
                 Ipv4Address::new(ip[0], ip[1], ip[2], ip[3]),
                 get_subnet_mask(),
             ),
-            gateway: Some(Ipv4Address::new(gateway[0], gateway[1], gateway[2], gateway[3])),
+            gateway: Some(Ipv4Address::new(
+                gateway[0], gateway[1], gateway[2], gateway[3],
+            )),
             dns_servers: Default::default(),
         }),
         make_static!(

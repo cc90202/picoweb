@@ -1,9 +1,9 @@
 //! Funzioni di utility per la generazione di pagine HTML
 use crate::configuration::CONFIG;
-use heapless::Vec;
-use heapless::format;
 use crate::form_value::FormValue;
 use crate::sudoku::Sudoku;
+use heapless::Vec;
+use heapless::format;
 
 const HTML_HEADER: &str =
     "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Sudoku Result</title></head><body>";
@@ -35,7 +35,6 @@ macro_rules! panic_led_loop_shared {
         }
     };
 }
-
 
 // Genera una pagina HTML di errore.
 ///
@@ -181,7 +180,7 @@ pub fn generate_html(form: &FormValue) -> heapless::String<1024> {
         form.row_8,
         form.row_9
     )
-        .unwrap_or_default();
+    .unwrap_or_default();
 
     let mut sudoku = Sudoku::default();
     let processing = match sudoku.parse(&schema) {

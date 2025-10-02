@@ -1,12 +1,12 @@
-use core::cell::RefCell;
 use crate::utility::generate_html;
+use core::cell::RefCell;
 
 /// Form data structure (per la HTTP POST) per inserire le 9 righe
 /// dello schema di Sudoku 9x9.
 /// L'inserimento avviene ad esempio con: 5,3,_,_,7,_,_,_,_ e così via
 /// per le 9 righe.
 #[derive(serde::Deserialize)]
-pub struct FormValue{
+pub struct FormValue {
     pub row_1: heapless::String<20>,
     pub row_2: heapless::String<20>,
     pub row_3: heapless::String<20>,
@@ -19,7 +19,6 @@ pub struct FormValue{
     #[serde(skip)]
     pub message: RefCell<heapless::String<1024>>,
 }
-
 
 impl picoserve::response::Content for FormValue {
     /// Specifica il tipo di contenuto della risposta HTTP (HTML)
