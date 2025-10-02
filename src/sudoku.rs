@@ -2,6 +2,9 @@
 //! contiene la logica per risolvere il gioco
 //! mediante backtracking e vincoli.
 
+//use embassy_rp::peripherals::PIO1;
+//use embassy_rp::pio::StateMachine;
+
 /// Errori possibili durante il parsing o la risoluzione del Sudoku
 pub enum SudokuError {
     InvalidFormat,

@@ -2,6 +2,8 @@
 use crate::configuration::CONFIG;
 use heapless::Vec;
 use heapless::format;
+use crate::form_value::FormValue;
+use crate::sudoku::Sudoku;
 
 const HTML_HEADER: &str =
     "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Sudoku Result</title></head><body>";
@@ -159,3 +161,41 @@ pub fn get_gateway_address() -> [u8; 4] {
         .unwrap_or([192, 168, 1, 1]) // Default Gateway
 }
 
+/// Genera una pagina HTML di risposta al form inviato.
+///
+/// # Argomenti
+/// * `form` - Riferimento alla struttura FormValue con i dati del form
+///
+/// # Ritorna
+/// * heapless::String<1024> - Pagina HTML generata
+pub fn generate_html(form: &FormValue) -> heapless::String<1024> {
+    let schema: heapless::String<1024> = format!(
+        "{} {} {} {} {} {} {} {} {}",
+        form.row_1,
+        form.row_2,
+        form.row_3,
+        form.row_4,
+        form.row_5,
+        form.row_6,
+        form.row_7,
+        form.row_8,
+        form.row_9
+    )
+        .unwrap_or_default();
+
+    let mut sudoku = Sudoku::default();
+    let processing = match sudoku.parse(&schema) {
+        Ok(_) => match sudoku.solve_fast() {
+            Ok(_) => html_table(&sudoku.grid),
+            Err(e) => error_html("Error solving schema", &e),
+        },
+        Err(e) => error_html("Error parsing schema", &e),
+    };
+
+    form.message.borrow_mut().clear();
+    form.message
+        .borrow_mut()
+        .push_str(&processing)
+        .unwrap_or_default();
+    processing
+}

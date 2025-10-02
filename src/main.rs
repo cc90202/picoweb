@@ -16,8 +16,10 @@ mod configuration;
 mod sudoku;
 #[macro_use]
 mod utility;
+mod pio;
+mod form_value;
 
-use core::cell::RefCell;
+
 use cyw43::{Control, JoinOptions};
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::*;
@@ -27,20 +29,19 @@ use embassy_net::Ipv4Address;
 use embassy_rp::bind_interrupts;
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::{Level, Output};
-use embassy_rp::peripherals::{DMA_CH0, PIO0, UART1, USB};
+use embassy_rp::peripherals::{DMA_CH0, PIO0, PIO1, UART1, USB};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_rp::uart::{Async, Config, InterruptHandler as UartInterruptHandler, UartRx, UartTx};
 use embassy_rp::usb::{Driver, InterruptHandler as UsbInterruptHandler};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Ticker, Timer};
-use heapless::format;
 use panic_persist as _;
 use picoserve::routing::{PathRouter, get_service};
 use picoserve::{AppRouter, AppWithStateBuilder, make_static};
 use static_cell::StaticCell;
-use sudoku::Sudoku;
 use utility::*;
+use crate::form_value::FormValue;
 
 const WEB_TASK_POOL_SIZE: usize = 10;
 const ELAPSED_SECS: u64 = 60;
@@ -71,100 +72,15 @@ bind_interrupts!(struct UsbIrqs {
     USBCTRL_IRQ => UsbInterruptHandler<USB>;
 });
 
-/// Form data structure (per la HTTP POST) per inserire le 9 righe
-/// dello schema di Sudoku 9x9.
-/// L'inserimento avviene ad esempio con: 5,3,_,_,7,_,_,_,_ e così via
-/// per le 9 righe.
-#[derive(serde::Deserialize)]
-struct FormValue {
-    pub row_1: heapless::String<20>,
-    pub row_2: heapless::String<20>,
-    pub row_3: heapless::String<20>,
-    pub row_4: heapless::String<20>,
-    pub row_5: heapless::String<20>,
-    pub row_6: heapless::String<20>,
-    pub row_7: heapless::String<20>,
-    pub row_8: heapless::String<20>,
-    pub row_9: heapless::String<20>,
-    #[serde(skip)]
-    message: RefCell<heapless::String<1024>>,
-}
+bind_interrupts!(struct IrqPIO1 {
+    PIO1_IRQ_0 => InterruptHandler<PIO1>;
+});
 
-/// Genera una pagina HTML di risposta al form inviato.
-///
-/// # Argomenti
-/// * `form` - Riferimento alla struttura FormValue con i dati del form
-///
-/// # Ritorna
-/// * heapless::String<1024> - Pagina HTML generata
-fn generate_html(form: &FormValue) -> heapless::String<1024> {
-    let schema: heapless::String<1024> = format!(
-        "{} {} {} {} {} {} {} {} {}",
-        form.row_1,
-        form.row_2,
-        form.row_3,
-        form.row_4,
-        form.row_5,
-        form.row_6,
-        form.row_7,
-        form.row_8,
-        form.row_9
-    )
-    .unwrap_or_default();
 
-    let mut sudoku = Sudoku::default();
-    let processing = match sudoku.parse(&schema) {
-        Ok(_) => match sudoku.solve_fast() {
-            Ok(_) => html_table(&sudoku.grid),
-            Err(e) => error_html("Error solving schema", &e),
-        },
-        Err(e) => error_html("Error parsing schema", &e),
-    };
 
-    form.message.borrow_mut().clear();
-    form.message
-        .borrow_mut()
-        .push_str(&processing)
-        .unwrap_or_default();
-    processing
-}
 
-impl picoserve::response::Content for FormValue {
-    /// Specifica il tipo di contenuto della risposta HTTP (HTML)
-    ///
-    /// # Ritorna
-    /// * &'static str - Tipo di contenuto
-    fn content_type(&self) -> &'static str {
-        "text/html"
-    }
 
-    /// Specifica la lunghezza del contenuto della risposta HTTP
-    /// (utile per l'header Content-Length).
-    ///
-    /// # Ritorna
-    /// * usize - Lunghezza del contenuto
-    fn content_length(&self) -> usize {
-        log::info!("CONTENT LENGTH");
-        let html = generate_html(self);
-        html.as_bytes().content_length()
-    }
 
-    /// Ridefinisce il metodo per scrivere il contenuto della risposta HTTP in modo dinamico
-    /// in base ai dati ricevuti nel form.
-    ///
-    /// # Argomenti
-    /// * `writer` - Writer per scrivere il contenuto della risposta HTTP
-    ///
-    /// # Ritorna
-    /// * Result<(), W::Error> - Risultato dell'operazione di scrittura
-    async fn write_content<W: picoserve::io::Write>(self, mut writer: W) -> Result<(), W::Error> {
-        log::info!("WRITE CONTENT");
-
-        // per essere sicuri che sia dropped dopo await
-        let content = self.message.borrow().clone();
-        writer.write_all(content.as_str().as_bytes()).await
-    }
-}
 
 /// Struttura per condividere il controller tra task embassy diversi
 #[derive(Clone, Copy)]
@@ -252,7 +168,7 @@ async fn main(spawner: Spawner) {
 
     let pwr = Output::new(p.PIN_23, Level::Low);
     let cs = Output::new(p.PIN_25, Level::High);
-    let mut pio = Pio::new(p.PIO0, Irqs);
+    let mut pio = Pio::new(p.PIO0, Irqs);       // <---- PIO0 for SPI communication
     let spi = PioSpi::new(
         &mut pio.common,
         pio.sm0,
@@ -274,6 +190,20 @@ async fn main(spawner: Spawner) {
     spawner.must_spawn(cyw43_task(runner)); //<---- 2
     panic_led_loop!(control);
 
+    // PIO1 per un timer di esempio ad altissima precisione che genera un interrupt
+    // e viene gestito dal PIO senza passare da CPU.
+    let pio1 = p.PIO1;
+    let Pio {   // destrutturazione per prendere solo quello che serve
+        mut common,
+        irq3,
+        mut sm2,
+        ..
+    } = Pio::new(pio1, IrqPIO1);
+
+    pio::setup_pio_task_sm2(&mut common, &mut sm2);
+
+    spawner.must_spawn(pio::pio_task_sm2(irq3, sm2)); //<---- esempio di task con PIO1 e interrupt
+    panic_led_loop!(control);
 
     control.init(clm).await;
     control
