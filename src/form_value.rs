@@ -1,26 +1,41 @@
+//! # Form Handling and HTTP Response
+//!
+//! This module defines the form data structure for Sudoku puzzle submission
+//! and implements the HTTP response generation with RAII-based resource management.
+
 use crate::utility::generate_html;
 use crate::SharedSm2;
 use core::cell::RefCell;
 
-/// Guard RAII per sm2: garantisce che sm2 venga sempre disattivata,
-/// anche in caso di panic durante la generazione dell'HTML.
-/// sm2 è usata solo per debug/monitoring - non critica.
+/// RAII guard for State Machine 2.
+///
+/// Ensures SM2 is always disabled after use, even in case of panic during
+/// HTML generation. SM2 is used only for debug/monitoring purposes and is
+/// non-critical for application functionality.
 struct Sm2Guard {
     shared_sm2: SharedSm2,
 }
 
 impl Sm2Guard {
-    /// Crea un nuovo guard e attiva sm2
-    /// Ritorna None se sm2 non è disponibile (non critico - solo debug)
+    /// Creates a new guard and activates SM2.
+    ///
+    /// # Arguments
+    ///
+    /// * `shared_sm2` - Shared reference to State Machine 2
+    ///
+    /// # Returns
+    ///
+    /// * `Some(Self)` - If SM2 lock was acquired and SM2 was enabled
+    /// * `None` - If SM2 is unavailable (non-critical, continues without debug timing)
     fn new(shared_sm2: SharedSm2) -> Option<Self> {
         match shared_sm2.0.try_lock() {
             Ok(mut sm) => {
                 sm.set_enable(true);
-                log::info!("sm2 attivata per debug");
+                log::info!("SM2 activated for debug timing");
                 Some(Self { shared_sm2 })
             }
             Err(_) => {
-                log::debug!("sm2 non disponibile - continua senza");
+                log::debug!("SM2 unavailable - continuing without debug timing");
                 None
             }
         }
@@ -28,22 +43,32 @@ impl Sm2Guard {
 }
 
 impl Drop for Sm2Guard {
-    /// Disattiva sm2 quando il guard viene distrutto (anche in caso di panic)
-    /// Se fallisce, logga warning ma NON fa panic (sm2 è solo per debug, non critica)
+    /// Disables SM2 when the guard is destroyed (even on panic).
+    ///
+    /// If disabling fails, logs a warning but does NOT panic since SM2 is
+    /// only used for debug timing and is not critical for functionality.
     fn drop(&mut self) {
         if let Ok(mut sm) = self.shared_sm2.0.try_lock() {
             sm.set_enable(false);
-            log::info!("sm2 disattivata");
+            log::info!("SM2 disabled");
         } else {
-            log::warn!("impossibile disattivare sm2 - non critico (solo debug)");
+            log::warn!("Unable to disable SM2 - non-critical (debug only)");
         }
     }
 }
 
-/// Form data structure (per la HTTP POST) per inserire le 9 righe
-/// dello schema di Sudoku 9x9.
-/// L'inserimento avviene ad esempio con: 5,3,_,_,7,_,_,_,_ e così via
-/// per le 9 righe.
+/// Form data structure for HTTP POST requests.
+///
+/// Contains the 9 rows of a 9x9 Sudoku puzzle. Each row is a comma-separated
+/// string of values, with `_` representing empty cells.
+///
+/// # Example
+///
+/// ```text
+/// row_1: "5,3,_,_,7,_,_,_,_"
+/// row_2: "6,_,_,1,9,5,_,_,_"
+/// ...
+/// ```
 #[derive(serde::Deserialize)]
 pub struct FormValue {
     pub row_1: heapless::String<20>,
@@ -60,39 +85,51 @@ pub struct FormValue {
 }
 
 impl picoserve::response::Content for FormValue {
-    /// Specifica il tipo di contenuto della risposta HTTP (HTML)
+    /// Returns the HTTP content type for the response.
+    ///
+    /// # Returns
+    ///
+    /// `"text/html"` content type string
     fn content_type(&self) -> &'static str {
         "text/html"
     }
 
-    /// Specifica la lunghezza del contenuto della risposta HTTP
-    /// (utile per l'header Content-Length).
-    /// Genera l'HTML attivando sm2 per la durata della generazione (se disponibile).
+    /// Calculates and returns the HTTP response content length.
     ///
-    /// # Ritorna
-    /// * usize - Lunghezza del contenuto
+    /// Generates the HTML response and activates SM2 for timing measurements
+    /// during generation (if available). The RAII guard ensures SM2 is
+    /// automatically disabled when this method returns.
+    ///
+    /// # Returns
+    ///
+    /// Content length in bytes
     fn content_length(&self) -> usize {
-        // Crea guard RAII: sm2 attivata qui, disattivata automaticamente a fine scope
+        // Create RAII guard: SM2 activated here, automatically disabled at end of scope
         let _guard = crate::get_shared_sm2().and_then(Sm2Guard::new);
 
-        // Genera HTML (con sm2 attiva se disponibile)
+        // Generate HTML and calculate length (SM2 remains active throughout)
         let html = generate_html(self);
+        let length = html.as_bytes().content_length();
 
-        // _guard droppato qui -> sm2 disattivata automaticamente
-        html.as_bytes().content_length()
+        // _guard dropped at end of scope -> SM2 automatically disabled
+        length
     }
 
-    /// Ridefinisce il metodo per scrivere il contenuto della risposta HTTP in modo dinamico
-    /// in base ai dati ricevuti nel form.
-    /// Scrive il contenuto già generato in content_length (evita rigenerazione).
+    /// Writes the HTTP response content dynamically based on form data.
     ///
-    /// # Argomenti
-    /// * `writer` - Writer per scrivere il contenuto della risposta HTTP
+    /// Uses the HTML already generated in `content_length()` to avoid
+    /// regenerating the response content.
     ///
-    /// # Ritorna
-    /// * Result<(), W::Error> - Risultato dell'operazione di scrittura
+    /// # Arguments
+    ///
+    /// * `writer` - HTTP response writer
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If write succeeds
+    /// * `Err(W::Error)` - If write fails
     async fn write_content<W: picoserve::io::Write>(self, mut writer: W) -> Result<(), W::Error> {
-        // Usa l'HTML già generato in content_length
+        // Use HTML already generated in content_length
         let content = self.message.borrow().clone();
         writer.write_all(content.as_str().as_bytes()).await
     }

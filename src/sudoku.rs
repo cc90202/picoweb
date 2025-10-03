@@ -1,11 +1,12 @@
-//! sudoku.rs - Questo file modella la struct Sudoku che
-//! contiene la logica per risolvere il gioco
-//! mediante backtracking e vincoli.
+//! # Sudoku Solver Module
+//!
+//! This module defines the Sudoku structure and contains the logic
+//! for solving Sudoku puzzles using backtracking and constraint propagation.
 
 //use embassy_rp::peripherals::PIO1;
 //use embassy_rp::pio::StateMachine;
 
-/// Errori possibili durante il parsing o la risoluzione del Sudoku
+/// Possible errors during Sudoku parsing or solving.
 pub enum SudokuError {
     InvalidFormat,
     InvalidNumber,
@@ -14,13 +15,15 @@ pub enum SudokuError {
 }
 
 impl core::fmt::Debug for SudokuError {
-    /// Formatta l'errore per essere stampato
+    /// Formats the error for display.
     ///
-    /// # Argomenti
-    /// * `f` - Formatter
+    /// # Arguments
     ///
-    /// # Ritorna
-    /// core::fmt::Result
+    /// * `f` - Formatter instance
+    ///
+    /// # Returns
+    ///
+    /// `core::fmt::Result`
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SudokuError::InvalidFormat => write!(f, "Invalid format"),
@@ -31,20 +34,34 @@ impl core::fmt::Debug for SudokuError {
     }
 }
 
+/// Sudoku puzzle representation.
 #[derive(Clone, Default)]
 pub struct Sudoku {
-    pub grid: [[u8; 9]; 9], // matrice 9x9
+    /// 9x9 grid containing the puzzle values (0 represents empty cells)
+    pub grid: [[u8; 9]; 9],
 }
 
 impl Sudoku {
-    /// Carica dal file lo schema txt
+    /// Parses a Sudoku schema from a string.
     ///
-    /// # Argomenti
-    /// * `filename` - Percorso del file
+    /// The schema should contain 9 rows separated by spaces, with each row
+    /// containing 9 comma-separated values. Use `_` for empty cells.
     ///
-    /// # Ritorna
+    /// # Arguments
     ///
-    /// Result oppure errore
+    /// * `schema` - String containing the puzzle schema
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - If parsing succeeds
+    /// * `Err(SudokuError)` - If parsing fails
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let mut sudoku = Sudoku::default();
+    /// sudoku.parse("5,3,_,_,7,_,_,_,_ 6,_,_,1,9,5,_,_,_ ...")?;
+    /// ```
     pub fn parse(&mut self, schema: &str) -> Result<(), SudokuError> {
         let lines = schema.split(" ").collect::<heapless::Vec<&str, 9>>();
 
@@ -79,17 +96,29 @@ impl Sudoku {
         Ok(())
     }
 
-    /// Risolve in modo più veloce lo schema
+    /// Solves the Sudoku puzzle using optimized backtracking with constraint tracking.
     ///
-    /// # Ritorna
+    /// This implementation uses three constraint arrays (rows, columns, boxes) to
+    /// track which numbers are already used, making the solution significantly faster
+    /// than naive backtracking.
     ///
-    /// Result oppure errore
+    /// # Returns
+    ///
+    /// * `Ok(())` - If a solution is found
+    /// * `Err(SudokuError::NoSolution)` - If no solution exists
+    ///
+    /// # Algorithm
+    ///
+    /// Uses recursive backtracking with constraint propagation:
+    /// - Maintains boolean arrays for used numbers in each row, column, and 3x3 box
+    /// - Only tries valid numbers at each position
+    /// - Backtracks when no valid number can be placed
     pub fn solve_fast(&mut self) -> Result<(), SudokuError> {
         let mut rows = [[false; 10]; 9];
         let mut cols = [[false; 10]; 9];
         let mut boxes = [[false; 10]; 9];
 
-        // Inizializza i vincoli
+        // Initialize constraints based on existing numbers
         for (row, grid_row) in self.grid.iter().enumerate() {
             for (col, _) in grid_row.iter().enumerate() {
                 let num = self.grid[row][col];

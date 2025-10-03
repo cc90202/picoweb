@@ -1,6 +1,11 @@
-//! File di configurazione di varibili amnbiente
-//! da modificare a seconda del proprio amnbiente.
-//! TODO: cambirare ip, gateway, ssid e password.
+//! # Environment Configuration
+//!
+//! Configuration file for environment variables.
+//! Modify according to your environment settings.
+//!
+//! # TODO
+//!
+//! Update IP address, gateway, SSID, and password for your network.
 
 pub const CONFIG: &str = r#"
 IP_ADDRESS=192, 168, 1, 115

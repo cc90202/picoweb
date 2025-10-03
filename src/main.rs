@@ -1,12 +1,16 @@
-//! Questa applicazione per Raspberry Pico 2 W
-//! realizza un web server che espone un servizio
-//! per l'inserimento di un form HTML per uno schema
-//! di Sudoku 9x9. Lo schema viene inviato via HTTP POST
-//! attraverso il crate 'picoserve'.
-//! Viene anche gestita la comunicazione seriale via UART su GP0 e GP1.
-//! Viene anche gestito il LED collegato al chip WiFi CYW43.
-//! Viene infine assegnato un indirizzo IP statico.
-//! Viene impostata la modalità di compilazione con nightly (vedi README).
+//! # Raspberry Pico 2 W Sudoku Web Server
+//!
+//! This application implements a web server for Raspberry Pico 2 W that provides:
+//! - HTML form interface for 9x9 Sudoku puzzle input
+//! - HTTP POST endpoint for puzzle submission using the `picoserve` crate
+//! - Serial communication via UART (GP0 and GP1)
+//! - CYW43 WiFi chip LED control
+//! - Static IP address configuration
+//! - High-precision PIO timer demonstration
+//!
+//! # Requirements
+//!
+//! This project requires Rust nightly toolchain (see README for configuration details).
 
 #![no_std]
 #![no_main]
@@ -79,50 +83,99 @@ bind_interrupts!(struct IrqPIO1 {
     PIO1_IRQ_0 => InterruptHandler<PIO1>;
 });
 
-/// Struttura per condividere il controller tra task embassy diversi
+/// Wrapper for sharing CYW43 control across Embassy tasks.
+///
+/// This structure provides a thread-safe way to share the WiFi control interface
+/// between multiple asynchronous tasks using a static mutex.
 #[derive(Clone, Copy)]
 pub struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static>>);
 
-// Alias di tipo per semplificare la gestione di SM2
+/// Type alias for PIO1 State Machine 2.
 type Sm2StateMachine = embassy_rp::pio::StateMachine<'static, PIO1, 2>;
+
+/// Type alias for the mutex protecting SM2.
 type Sm2Mutex = Mutex<CriticalSectionRawMutex, Sm2StateMachine>;
+
+/// Type alias for the thread-safe cell containing optional SM2 reference.
 type Sm2Cell = CsMutex<RefCell<Option<&'static Sm2Mutex>>>;
 
-/// Struttura per condividere la state machine sm2 tra task embassy diversi
+/// Wrapper for sharing PIO State Machine 2 across Embassy tasks.
+///
+/// This structure provides a thread-safe way to share the PIO state machine
+/// between multiple asynchronous tasks, primarily used during HTML generation
+/// for high-precision timing measurements.
 #[derive(Clone, Copy)]
 pub struct SharedSm2(&'static Sm2Mutex);
 
-// Variabile statica globale per SharedSm2 usando critical_section::Mutex + RefCell
-// (thread-safe per embedded, no unsafe, no static mut)
+/// Global static storage for SharedSm2.
+///
+/// Thread-safe implementation using critical_section::Mutex + RefCell.
+/// This avoids `static mut` and unsafe code while maintaining embedded safety.
 static SHARED_SM2_CELL: Sm2Cell = CsMutex::new(RefCell::new(None));
 
-/// Ottiene il riferimento a SharedSm2 globale in modo thread-safe
+/// Retrieves the global SharedSm2 reference in a thread-safe manner.
+///
+/// # Returns
+///
+/// * `Some(SharedSm2)` - If the state machine has been initialized
+/// * `None` - If the state machine has not been initialized yet
+///
+/// # Thread Safety
+///
+/// This function uses critical sections to ensure safe concurrent access.
 pub fn get_shared_sm2() -> Option<SharedSm2> {
     critical_section::with(|cs| {
         SHARED_SM2_CELL.borrow(cs).borrow().as_ref().map(|ptr| SharedSm2(ptr))
     })
 }
 
-/// Imposta il riferimento a SharedSm2 globale (da chiamare solo dal main una sola volta)
-/// Panic se viene chiamato più di una volta.
+/// Initializes the global SharedSm2 reference.
+///
+/// # Arguments
+///
+/// * `sm2` - Static reference to the PIO state machine mutex
+///
+/// # Panics
+///
+/// Panics if called more than once. This function should only be called
+/// from `main` during initialization.
+///
+/// # Thread Safety
+///
+/// Uses critical sections to ensure safe initialization.
 fn set_shared_sm2(sm2: &'static Sm2Mutex) {
     critical_section::with(|cs| {
         let mut cell = SHARED_SM2_CELL.borrow(cs).borrow_mut();
         if cell.is_some() {
-            core::panic!("SHARED_SM2 già inizializzato - set_shared_sm2() chiamato più volte");
+            log::error!("SHARED_SM2 already initialized - set_shared_sm2() called multiple times");
+            core::panic!("SHARED_SM2 already initialized - set_shared_sm2() called multiple times");
         }
         *cell = Some(sm2);
     });
 }
 
-/// Entry point principale secondo Embassy
+/// Main entry point for the Embassy executor.
+///
+/// Initializes all hardware peripherals, WiFi connection, network stack,
+/// and spawns all background tasks including:
+/// - USB logger
+/// - WiFi driver (CYW43)
+/// - Network stack
+/// - UART reader
+/// - LED blinker
+/// - Periodic timer
+/// - Web server task pool
+///
+/// # Arguments
+///
+/// * `spawner` - Embassy task spawner for launching concurrent tasks
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
 
-    // Parte il logger su USB
+    // Start USB logger
     let driver = Driver::new(p.USB, UsbIrqs);
-    spawner.must_spawn(logger_task(driver)); //<---- 1
+    spawner.must_spawn(logger_task(driver));
     if let Some(panic_message) = panic_persist::get_panic_message_utf8() {
         log::error!("{panic_message}");
         loop {
@@ -161,15 +214,14 @@ async fn main(spawner: Spawner) {
     let state = STATE.init(cyw43::State::new());
     let (net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
 
-    // parte il task di gestione del chip WiFi
-    spawner.must_spawn(cyw43_task(runner)); //<---- 2
+    // Start WiFi chip management task
+    spawner.must_spawn(cyw43_task(runner));
     panic_led_loop!(control);
 
-    // PIO1 per un timer di esempio ad altissima precisione che genera un interrupt
-    // e viene gestito dal PIO senza passare da CPU.
+    // Initialize PIO1 for high-precision timer demonstration
+    // The timer generates interrupts handled entirely by PIO without CPU involvement
     let pio1 = p.PIO1;
     let Pio {
-        // destrutturazione per prendere solo quello che serve
         mut common,
         mut sm2,
         ..
@@ -177,8 +229,8 @@ async fn main(spawner: Spawner) {
 
     pio::setup_pio_task_sm2(&mut common, &mut sm2);
 
-    // Inizializza la variabile statica globale con sm2
-    // sm2 verrà attivata solo durante la generazione dell'HTML
+    // Initialize global static SM2 reference
+    // SM2 is activated only during HTML generation for timing measurements
     let sm2_ref = make_static!(Sm2Mutex, Mutex::new(sm2));
     set_shared_sm2(sm2_ref);
 
@@ -190,11 +242,11 @@ async fn main(spawner: Spawner) {
     let uart_tx: UartTx<'_, Async> = UartTx::new(p.UART0, p.PIN_0, p.DMA_CH1, Config::default());
     let uart_rx = UartRx::new(p.UART1, p.PIN_5, UartIrqs, p.DMA_CH2, Config::default());
 
-    // Fa partire la UART (lettura)
-    spawner.must_spawn(reader(uart_rx)); //<---- 3
+    // Start UART reader task
+    spawner.must_spawn(reader(uart_rx));
     panic_led_loop!(control);
 
-    // Genera un random seed per il network stack
+    // Generate random seed for network stack
     let seed: u64 = RoscRng.next_u64();
     log::info!("Random seed value seeded to {}", seed);
 
@@ -220,8 +272,8 @@ async fn main(spawner: Spawner) {
         seed,
     );
 
-    // parte il task di gestione del network
-    spawner.must_spawn(net_task(runner)); //<---- 4
+    // Start network stack management task
+    spawner.must_spawn(net_task(runner));
     panic_led_loop!(control);
 
     while let Err(err) = control
@@ -237,23 +289,22 @@ async fn main(spawner: Spawner) {
 
     // And now we can use it!
     log::info!("Stack is up!");
-    // Recupera la configurazione IPv4
+    // Retrieve IPv4 configuration
     if let Some(config) = stack.config_v4() {
         let ip = config.address.address();
         log::info!("Assigned IP: {ip}");
     }
 
-    // Definiamo un controllore comune da condividere tra i task
+    // Create shared control wrapper for task sharing
     let shared_control = SharedControl(
         make_static!(Mutex<CriticalSectionRawMutex, Control<'static>>, Mutex::new(control)),
     );
 
-    // Fa partire il blink del LED collegato al cyw43
-    spawner.must_spawn(blink_task_shared(shared_control, uart_tx)); //<---- 5
+    // Start LED blinker task for CYW43 chip
+    spawner.must_spawn(blink_task_shared(shared_control, uart_tx));
     panic_led_loop_shared!(shared_control);
 
-    // Fa partire un timer: per ora non serve a molto, se non a dimostrare
-    // che il sistema è vivo.
+    // Start ticker task to demonstrate system is alive
     spawner.must_spawn(ticker_task());
     panic_led_loop_shared!(shared_control);
 
@@ -270,7 +321,7 @@ async fn main(spawner: Spawner) {
         .keep_connection_alive()
     );
 
-    // Fa partire i task del web server per rispondere a diverse richieste in parallelo,
+    // Start web server task pool to handle parallel HTTP requests
     for id in 0..WEB_TASK_POOL_SIZE - 2 {
         unwrap!(spawner.spawn(web_task(
             id,
@@ -287,14 +338,20 @@ async fn main(spawner: Spawner) {
     );
 }
 
-// Tasks that run in the background:
-/// WIFI task runner
+// Background tasks
+
+/// WiFi driver task for CYW43 chip.
 ///
-/// # Argomenti
-/// * `runner` - cyw43 runner
+/// Runs the WiFi driver event loop indefinitely, handling low-level
+/// WiFi operations including packet transmission/reception and chip management.
 ///
-/// # Ritorna
-/// * ! - Non ritorna mai
+/// # Arguments
+///
+/// * `runner` - CYW43 WiFi driver runner instance
+///
+/// # Returns
+///
+/// Never returns (infinite loop)
 #[embassy_executor::task]
 async fn cyw43_task(
     runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>,
@@ -302,54 +359,69 @@ async fn cyw43_task(
     runner.run().await
 }
 
+/// Network stack task.
+///
+/// Runs the Embassy network stack event loop indefinitely, handling
+/// TCP/IP protocol operations, socket management, and network state.
+///
+/// # Arguments
+///
+/// * `runner` - Embassy network stack runner instance
+///
+/// # Returns
+///
+/// Never returns (infinite loop)
 #[embassy_executor::task]
-/// Network task runner
-///
-/// # Argomenti
-/// * `runner` - embassy net runner
-///
-/// # Ritorna
-/// * ! - Non ritorna mai
 async fn net_task(mut runner: embassy_net::Runner<'static, cyw43::NetDriver<'static>>) -> ! {
     runner.run().await
 }
 
+/// USB logger task.
+///
+/// Provides logging output over USB serial connection with 1024 byte buffer
+/// and Info level filtering.
+///
+/// # Arguments
+///
+/// * `driver` - USB driver instance for serial communication
 #[embassy_executor::task]
-/// Logger task for USB
-///
-/// # Argomenti
-/// * `driver` - USB driver
-///
-/// # Ritorna
-/// * ! - Non ritorna mai
 async fn logger_task(driver: Driver<'static, USB>) {
     embassy_usb_logger::run!(1024, log::LevelFilter::Info, driver);
 }
 
-#[embassy_executor::task]
-/// Timer task che logga un valore random ogni 5 secondi
+/// Periodic timer task.
 ///
-/// # Ritorna
-/// * ! - Non ritorna mai
+/// Logs a random number every 60 seconds to demonstrate that the system
+/// is alive and responsive.
+///
+/// # Returns
+///
+/// Never returns (infinite loop)
+#[embassy_executor::task]
 async fn ticker_task() {
     let mut ticker = Ticker::every(Duration::from_secs(ELAPSED_SECS));
     loop {
         ticker.next().await;
-        // calcola un random number
+        // Generate random number for logging
         let random_number: u32 = RoscRng.next_u32();
 
         log::info!("[Timer tick {random_number:2}]");
     }
 }
 
+/// UART receiver task.
+///
+/// Continuously reads 32-byte chunks from the UART interface and logs
+/// the received data. Used for debugging and external communication.
+///
+/// # Arguments
+///
+/// * `rx` - UART receiver instance configured for asynchronous operation
+///
+/// # Returns
+///
+/// Never returns (infinite loop)
 #[embassy_executor::task]
-/// UART reader task
-///
-/// # Argomenti
-/// * `rx` - UART receiver
-///
-/// # Ritorna
-/// * ! - Non ritorna mai
 async fn reader(mut rx: UartRx<'static, Async>) {
     info!("Reading...");
     loop {
@@ -360,15 +432,20 @@ async fn reader(mut rx: UartRx<'static, Async>) {
     }
 }
 
+/// LED blinker task with UART status output.
+///
+/// Toggles the WiFi chip's LED every 250ms and sends status messages
+/// via UART to indicate the LED state.
+///
+/// # Arguments
+///
+/// * `shared_control` - Shared WiFi controller for LED access
+/// * `uart_tx` - UART transmitter for sending status messages
+///
+/// # Returns
+///
+/// Never returns (infinite loop)
 #[embassy_executor::task]
-/// Blink task che toggla il LED collegato al chip WiFi CYW43
-///
-/// # Argomenti
-/// * `shared_control` - Controller condiviso per il WiFi
-/// * `uart_tx` - UART transmitter
-///
-/// # Ritorna
-/// * ! - Non ritorna mai
 async fn blink_task_shared(shared_control: SharedControl, mut uart_tx: UartTx<'static, Async>) {
     let delay = Duration::from_millis(250);
     loop {
@@ -384,16 +461,26 @@ async fn blink_task_shared(shared_control: SharedControl, mut uart_tx: UartTx<'s
     }
 }
 
+/// Web server task pool handler.
+///
+/// Handles HTTP requests on port 80 using the picoserve framework.
+/// Multiple instances run concurrently (defined by WEB_TASK_POOL_SIZE)
+/// to handle parallel client connections.
+///
+/// Each task maintains its own TCP and HTTP buffers for request processing.
+///
+/// # Arguments
+///
+/// * `id` - Unique identifier for this task instance
+/// * `stack` - Network stack for TCP/IP operations
+/// * `app` - Application router defining HTTP endpoints
+/// * `config` - Server configuration including timeouts and keep-alive settings
+/// * `state` - Shared application state (includes WiFi control)
+///
+/// # Returns
+///
+/// Never returns (infinite loop)
 #[embassy_executor::task(pool_size = WEB_TASK_POOL_SIZE)]
-/// Web server task che risponde alle richieste HTTP
-///
-/// # Argomenti
-///
-/// * `id` - ID del task
-/// * `stack` - Stack di rete
-/// * `app` - Router dell'applicazione
-/// * `config` - Configurazione del server
-/// * `state` - Stato dell'applicazione
 async fn web_task(
     id: usize,
     stack: embassy_net::Stack<'static>,

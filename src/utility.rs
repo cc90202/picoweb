@@ -1,4 +1,6 @@
-//! Funzioni di utility per la generazione di pagine HTML
+//! # Utility Functions
+//!
+//! Utility functions for HTML page generation and configuration parsing.
 use crate::configuration::CONFIG;
 use crate::form_value::FormValue;
 use crate::sudoku::Sudoku;
@@ -36,13 +38,16 @@ macro_rules! panic_led_loop_shared {
     };
 }
 
-// Genera una pagina HTML di errore.
+/// Generates an HTML error page.
 ///
-/// # Argomenti
-/// * `msg` - Messaggio di errore
+/// # Arguments
 ///
-/// # Ritorna
-/// * heapless::String<1024> - Pagina HTML generata
+/// * `msg` - Error message to display
+/// * `err` - Error object implementing Debug trait
+///
+/// # Returns
+///
+/// `heapless::String<1024>` containing the generated HTML error page
 pub fn error_html<T: core::fmt::Debug>(msg: &str, err: &T) -> heapless::String<1024> {
     format!(
         "{header}<h1>{msg}: {:?}</h1>{footer}",
@@ -53,13 +58,15 @@ pub fn error_html<T: core::fmt::Debug>(msg: &str, err: &T) -> heapless::String<1
     .unwrap_or_default()
 }
 
-/// Genera una tabella HTML dal risultato del Sudoku risolto.
+/// Generates an HTML table from a solved Sudoku grid.
 ///
-/// # Argomenti
-/// * `grid` - Riferimento alla matrice 9x9 del Sudoku risolto
+/// # Arguments
 ///
-/// # Ritorna
-/// * heapless::String<1024> - Tabella HTML generata
+/// * `grid` - Reference to the 9x9 solved Sudoku matrix
+///
+/// # Returns
+///
+/// `heapless::String<1024>` containing the generated HTML table
 pub fn html_table(grid: &[[u8; 9]; 9]) -> heapless::String<1024> {
     let mut html = heapless::String::<1024>::new();
     html.push_str(HTML_HEADER).unwrap();
@@ -78,10 +85,11 @@ pub fn html_table(grid: &[[u8; 9]; 9]) -> heapless::String<1024> {
     html
 }
 
-/// Estrae l'SSID dalla configurazione.
+/// Extracts the WiFi SSID from the configuration.
 ///
-/// # Ritorna
-/// * &str - SSID della rete WiFi
+/// # Returns
+///
+/// WiFi network SSID as a static string slice
 pub fn get_ssid() -> &'static str {
     CONFIG
         .lines()
@@ -90,10 +98,11 @@ pub fn get_ssid() -> &'static str {
         .unwrap_or("")
 }
 
-/// Estrae la password di rete dalla configurazione.
+/// Extracts the WiFi password from the configuration.
 ///
-/// # Ritorna
-/// * &str - Password della rete WiFi
+/// # Returns
+///
+/// WiFi network password as a static string slice
 pub fn get_wifi_password() -> &'static str {
     CONFIG
         .lines()
@@ -102,10 +111,12 @@ pub fn get_wifi_password() -> &'static str {
         .unwrap_or("")
 }
 
-/// Estrae l'indirizzo IP dalla configurazione, di default 192.168.1.115
+/// Extracts the IP address from the configuration.
 ///
-/// # Ritorna
-/// * [u8; 4] - Indirizzo IP
+/// # Returns
+///
+/// IP address as a 4-byte array. Defaults to `[192, 168, 1, 115]` if not configured
+/// or if parsing fails.
 pub fn get_ip_address() -> [u8; 4] {
     CONFIG
         .lines()
@@ -125,10 +136,12 @@ pub fn get_ip_address() -> [u8; 4] {
         .unwrap_or([192, 168, 1, 115]) // Default IP
 }
 
-/// Estrae la submask dalla configurazione, di default 24.
+/// Extracts the subnet mask from the configuration.
 ///
-/// # Ritorna
-/// * u8 - Subnet mask
+/// # Returns
+///
+/// Subnet mask as CIDR prefix length (e.g., 24 for 255.255.255.0).
+/// Defaults to `24` if not configured or if parsing fails.
 pub fn get_subnet_mask() -> u8 {
     CONFIG
         .lines()
@@ -137,10 +150,12 @@ pub fn get_subnet_mask() -> u8 {
         .unwrap_or(24) // Default subnet mask
 }
 
-/// Estrae l'indirizzo del gateway dalla configurazione. Di default 192.168.1.1
+/// Extracts the gateway address from the configuration.
 ///
-/// # Ritorna
-/// * [u8; 4] - Indirizzo IP del gateway
+/// # Returns
+///
+/// Gateway IP address as a 4-byte array. Defaults to `[192, 168, 1, 1]` if not
+/// configured or if parsing fails.
 pub fn get_gateway_address() -> [u8; 4] {
     CONFIG
         .lines()
@@ -160,13 +175,18 @@ pub fn get_gateway_address() -> [u8; 4] {
         .unwrap_or([192, 168, 1, 1]) // Default Gateway
 }
 
-/// Genera una pagina HTML di risposta al form inviato.
+/// Generates an HTML response page from submitted form data.
 ///
-/// # Argomenti
-/// * `form` - Riferimento alla struttura FormValue con i dati del form
+/// Parses the Sudoku puzzle from the form, attempts to solve it, and generates
+/// an HTML table with the solution or an error message.
 ///
-/// # Ritorna
-/// * heapless::String<1024> - Pagina HTML generata
+/// # Arguments
+///
+/// * `form` - Reference to the FormValue structure containing form data
+///
+/// # Returns
+///
+/// `heapless::String<1024>` containing the generated HTML response page
 pub fn generate_html(form: &FormValue) -> heapless::String<1024> {
     let schema: heapless::String<1024> = format!(
         "{} {} {} {} {} {} {} {} {}",

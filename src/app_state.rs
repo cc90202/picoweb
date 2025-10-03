@@ -1,19 +1,31 @@
+//! # Application State Management
+//!
+//! This module defines the shared application state accessible to all HTTP handlers.
+
 use crate::SharedControl;
 
-/// Stato dell'applicazione condifiviso tra i task embassy
+/// Application state shared across Embassy tasks and HTTP handlers.
+///
+/// Contains resources that need to be accessible to web request handlers,
+/// such as the WiFi controller for LED control and status checks.
 pub struct AppState {
+    /// Shared WiFi controller for CYW43 chip operations
     pub shared_control: SharedControl,
 }
 
-// Permette di estrarre il controller condiviso dallo stato dell'applicazione
 impl picoserve::extract::FromRef<AppState> for SharedControl {
-    /// Ritorna il controller condiviso
+    /// Extracts the shared WiFi controller from application state.
     ///
-    /// # Argomenti
-    /// * `state` - Riferimento allo stato dell'applicazione
+    /// This implementation allows HTTP handlers to access the WiFi controller
+    /// through picoserve's dependency injection system.
     ///
-    /// # Ritorna
-    /// * Self - Controller condiviso
+    /// # Arguments
+    ///
+    /// * `state` - Reference to the application state
+    ///
+    /// # Returns
+    ///
+    /// Copy of the shared WiFi controller wrapper
     fn from_ref(state: &AppState) -> Self {
         state.shared_control
     }
