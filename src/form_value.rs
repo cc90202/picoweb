@@ -109,10 +109,9 @@ impl picoserve::response::Content for FormValue {
 
         // Generate HTML and calculate length (SM2 remains active throughout)
         let html = generate_html(self);
-        let length = html.as_bytes().content_length();
+        html.as_bytes().content_length()
 
         // _guard dropped at end of scope -> SM2 automatically disabled
-        length
     }
 
     /// Writes the HTTP response content dynamically based on form data.
