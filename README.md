@@ -6,6 +6,10 @@ Questo progetto utilizza il file `rust-toolchain.toml` per selezionare automatic
   ```sh
   rustup --version
   ```
+  Aggiungere anche il target:
+```sh
+  rustup target add thumbv8m.main-none-eabihf
+```
 
 ## Selezione automatica del toolchain
 Quando entri nella directory del progetto, rustup rileva il file `rust-toolchain.toml` e 
