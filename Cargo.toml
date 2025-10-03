@@ -35,6 +35,7 @@ picoserve = { version = "0.16.0", features = ["embassy", "log"]  }
 serde = { version = "1.0.206", default-features = false, features = ["derive"] }
 fixed = "1.29.0"
 fixed-macro = "1.2.0"
+critical-section = "1.2.0"
 
 [profile.release]
 # Enable generation of debug symbols even on release builds

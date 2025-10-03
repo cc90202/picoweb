@@ -23,6 +23,8 @@ mod pio;
 
 use crate::app_props::AppProps;
 use crate::app_state::AppState;
+use core::cell::RefCell;
+use critical_section::Mutex as CsMutex;
 use cyw43::{Control, JoinOptions};
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::*;
@@ -85,21 +87,28 @@ pub struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static
 #[derive(Clone, Copy)]
 pub struct SharedSm2(&'static Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>);
 
-// Variabile statica globale per SharedSm2
-static mut SHARED_SM2_PTR: Option<&'static Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>> = None;
+// Variabile statica globale per SharedSm2 usando critical_section::Mutex + RefCell
+// (thread-safe per embedded, no unsafe, no static mut)
+static SHARED_SM2_CELL: CsMutex<RefCell<Option<&'static Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>>>>
+    = CsMutex::new(RefCell::new(None));
 
-/// Ottiene il riferimento a SharedSm2 globale
+/// Ottiene il riferimento a SharedSm2 globale in modo thread-safe
 pub fn get_shared_sm2() -> Option<SharedSm2> {
-    unsafe {
-        SHARED_SM2_PTR.map(|ptr| SharedSm2(ptr))
-    }
+    critical_section::with(|cs| {
+        SHARED_SM2_CELL.borrow(cs).borrow().as_ref().map(|ptr| SharedSm2(*ptr))
+    })
 }
 
-/// Imposta il riferimento a SharedSm2 globale (da chiamare solo dal main)
+/// Imposta il riferimento a SharedSm2 globale (da chiamare solo dal main una sola volta)
+/// Panic se viene chiamato più di una volta.
 fn set_shared_sm2(sm2: &'static Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>) {
-    unsafe {
-        SHARED_SM2_PTR = Some(sm2);
-    }
+    critical_section::with(|cs| {
+        let mut cell = SHARED_SM2_CELL.borrow(cs).borrow_mut();
+        if cell.is_some() {
+            core::panic!("SHARED_SM2 già inizializzato - set_shared_sm2() chiamato più volte");
+        }
+        *cell = Some(sm2);
+    });
 }
 
 /// Entry point principale secondo Embassy
