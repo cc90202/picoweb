@@ -224,6 +224,7 @@ async fn main(spawner: Spawner) {
     let Pio {
         mut common,
         mut sm2,
+        irq3,
         ..
     } = Pio::new(pio1, IrqPIO1);
 
@@ -233,6 +234,11 @@ async fn main(spawner: Spawner) {
     // SM2 is activated only during HTML generation for timing measurements
     let sm2_ref = make_static!(Sm2Mutex, Mutex::new(sm2));
     set_shared_sm2(sm2_ref);
+
+    // Start PIO task to handle SM2 interrupts (SM2 enabled/disabled by Sm2Guard during HTML generation)
+    let shared_sm2 = SharedSm2(sm2_ref);
+    spawner.must_spawn(pio::pio_task_sm2(irq3, shared_sm2));
+    panic_led_loop!(control);
 
     control.init(clm).await;
     control

@@ -47,22 +47,20 @@ pub fn setup_pio_task_sm2<'a>(pio: &mut Common<'a, PIO1>, sm: &mut StateMachine<
 /// PIO State Machine 2 interrupt handler task.
 ///
 /// This task waits for IRQ 3 from SM2 and logs when interrupts occur.
-/// Used for debugging and demonstrating high-precision PIO timing.
+/// SM2 is enabled/disabled dynamically by `Sm2Guard` during HTML generation.
 ///
 /// # Arguments
 ///
 /// * `irq` - IRQ 3 handler for PIO1
-/// * `shared_sm2` - Shared reference to State Machine 2
+/// * `_shared_sm2` - Shared reference to State Machine 2 (unused, SM2 controlled by Sm2Guard)
 ///
 /// # Behavior
 ///
-/// - Enables SM2 at startup
-/// - Waits for IRQ 3 events
-/// - Logs each interrupt occurrence
+/// - Waits for IRQ 3 events (which occur only when SM2 is enabled)
+/// - Logs each interrupt occurrence during Sudoku solving
 /// - Runs indefinitely
 #[embassy_executor::task]
-pub async fn pio_task_sm2(mut irq: Irq<'static, PIO1, 3>, shared_sm2: crate::SharedSm2) {
-    shared_sm2.0.lock().await.set_enable(true);
+pub async fn pio_task_sm2(mut irq: Irq<'static, PIO1, 3>, _shared_sm2: crate::SharedSm2) {
     loop {
         irq.wait().await;
         log::info!("--> Solving...");
