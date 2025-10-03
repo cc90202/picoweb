@@ -1,5 +1,38 @@
 use crate::utility::generate_html;
+use crate::SharedSm2;
 use core::cell::RefCell;
+
+/// Guard RAII per sm2: garantisce che sm2 venga sempre disattivata,
+/// anche in caso di panic durante la generazione dell'HTML.
+struct Sm2Guard {
+    shared_sm2: SharedSm2,
+}
+
+impl Sm2Guard {
+    /// Crea un nuovo guard e attiva sm2
+    fn new(shared_sm2: SharedSm2) -> Option<Self> {
+        if let Ok(mut sm) = shared_sm2.0.try_lock() {
+            sm.set_enable(true);
+            log::info!("sm2 attivata - inizia generazione HTML");
+            Some(Self { shared_sm2 })
+        } else {
+            log::warn!("sm2 lock fallito - impossibile attivare sm2");
+            None
+        }
+    }
+}
+
+impl Drop for Sm2Guard {
+    /// Disattiva sm2 quando il guard viene distrutto (anche in caso di panic)
+    fn drop(&mut self) {
+        if let Ok(mut sm) = self.shared_sm2.0.try_lock() {
+            sm.set_enable(false);
+            log::info!("sm2 disattivata - fine generazione HTML");
+        } else {
+            log::error!("sm2 lock fallito durante drop - sm2 potrebbe rimanere attiva!");
+        }
+    }
+}
 
 /// Form data structure (per la HTTP POST) per inserire le 9 righe
 /// dello schema di Sudoku 9x9.
@@ -29,31 +62,22 @@ impl picoserve::response::Content for FormValue {
     /// Specifica la lunghezza del contenuto della risposta HTTP
     /// (utile per l'header Content-Length).
     /// Genera l'HTML attivando sm2 per la durata della generazione.
+    /// Usa un guard RAII per garantire che sm2 venga sempre disattivata.
     ///
     /// # Ritorna
     /// * usize - Lunghezza del contenuto
     fn content_length(&self) -> usize {
         log::info!("CONTENT LENGTH - generazione HTML");
 
-        // Attiva sm2 in modo sincrono (try_lock non blocca)
-        if let Some(shared_sm2) = crate::get_shared_sm2() {
-            if let Ok(mut sm) = shared_sm2.0.try_lock() {
-                sm.set_enable(true);
-                log::info!("sm2 attivata - inizia generazione HTML");
-            }
-        }
+        // Crea il guard RAII: sm2 viene attivata qui
+        // e verrà automaticamente disattivata quando _guard esce dallo scope
+        let _guard = crate::get_shared_sm2().and_then(Sm2Guard::new);
 
         // Genera l'HTML con sm2 attiva e salva in self.message
+        // Anche se generate_html va in panic, Drop verrà chiamato
         let html = generate_html(self);
 
-        // Disattiva sm2
-        if let Some(shared_sm2) = crate::get_shared_sm2() {
-            if let Ok(mut sm) = shared_sm2.0.try_lock() {
-                sm.set_enable(false);
-                log::info!("sm2 disattivata - fine generazione HTML");
-            }
-        }
-
+        // _guard viene droppato qui -> sm2 disattivata automaticamente
         html.as_bytes().content_length()
     }
 
