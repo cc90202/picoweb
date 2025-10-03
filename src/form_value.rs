@@ -22,26 +22,44 @@ pub struct FormValue {
 
 impl picoserve::response::Content for FormValue {
     /// Specifica il tipo di contenuto della risposta HTTP (HTML)
-    ///
-    /// # Ritorna
-    /// * &'static str - Tipo di contenuto
     fn content_type(&self) -> &'static str {
         "text/html"
     }
 
     /// Specifica la lunghezza del contenuto della risposta HTTP
     /// (utile per l'header Content-Length).
+    /// Genera l'HTML attivando sm2 per la durata della generazione.
     ///
     /// # Ritorna
     /// * usize - Lunghezza del contenuto
     fn content_length(&self) -> usize {
-        log::info!("CONTENT LENGTH");
+        log::info!("CONTENT LENGTH - generazione HTML");
+
+        // Attiva sm2 in modo sincrono (try_lock non blocca)
+        if let Some(shared_sm2) = crate::get_shared_sm2() {
+            if let Ok(mut sm) = shared_sm2.0.try_lock() {
+                sm.set_enable(true);
+                log::info!("sm2 attivata - inizia generazione HTML");
+            }
+        }
+
+        // Genera l'HTML con sm2 attiva e salva in self.message
         let html = generate_html(self);
+
+        // Disattiva sm2
+        if let Some(shared_sm2) = crate::get_shared_sm2() {
+            if let Ok(mut sm) = shared_sm2.0.try_lock() {
+                sm.set_enable(false);
+                log::info!("sm2 disattivata - fine generazione HTML");
+            }
+        }
+
         html.as_bytes().content_length()
     }
 
     /// Ridefinisce il metodo per scrivere il contenuto della risposta HTTP in modo dinamico
     /// in base ai dati ricevuti nel form.
+    /// Scrive il contenuto già generato in content_length (evita rigenerazione).
     ///
     /// # Argomenti
     /// * `writer` - Writer per scrivere il contenuto della risposta HTTP
@@ -49,9 +67,9 @@ impl picoserve::response::Content for FormValue {
     /// # Ritorna
     /// * Result<(), W::Error> - Risultato dell'operazione di scrittura
     async fn write_content<W: picoserve::io::Write>(self, mut writer: W) -> Result<(), W::Error> {
-        log::info!("WRITE CONTENT");
+        log::info!("WRITE CONTENT - usa HTML già generato");
 
-        // per essere sicuri che sia dropped dopo await
+        // Usa l'HTML già generato in content_length
         let content = self.message.borrow().clone();
         writer.write_all(content.as_str().as_bytes()).await
     }

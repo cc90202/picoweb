@@ -30,7 +30,7 @@ impl AppWithStateBuilder for AppProps {
                 .post(
                     |picoserve::extract::Form(form_value): picoserve::extract::Form<FormValue>| {
                         async move {
-                            form_value // magia grazie al trait Content ridefinito sopra
+                            form_value
                         }
                     },
                 ),

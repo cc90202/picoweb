@@ -23,8 +23,8 @@ pub fn setup_pio_task_sm2<'a>(pio: &mut Common<'a, PIO1>, sm: &mut StateMachine<
 }
 
 #[embassy_executor::task]
-pub async fn pio_task_sm2(mut irq: Irq<'static, PIO1, 3>, mut sm: StateMachine<'static, PIO1, 2>) {
-    sm.set_enable(true);
+pub async fn pio_task_sm2(mut irq: Irq<'static, PIO1, 3>, shared_sm2: crate::SharedSm2) {
+    shared_sm2.0.lock().await.set_enable(true);
     loop {
         irq.wait().await;
         log::info!("--> Solving...");

@@ -79,7 +79,28 @@ bind_interrupts!(struct IrqPIO1 {
 
 /// Struttura per condividere il controller tra task embassy diversi
 #[derive(Clone, Copy)]
-struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static>>);
+pub struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static>>);
+
+/// Struttura per condividere la state machine sm2 tra task embassy diversi
+#[derive(Clone, Copy)]
+pub struct SharedSm2(&'static Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>);
+
+// Variabile statica globale per SharedSm2
+static mut SHARED_SM2_PTR: Option<&'static Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>> = None;
+
+/// Ottiene il riferimento a SharedSm2 globale
+pub fn get_shared_sm2() -> Option<SharedSm2> {
+    unsafe {
+        SHARED_SM2_PTR.map(|ptr| SharedSm2(ptr))
+    }
+}
+
+/// Imposta il riferimento a SharedSm2 globale (da chiamare solo dal main)
+fn set_shared_sm2(sm2: &'static Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>) {
+    unsafe {
+        SHARED_SM2_PTR = Some(sm2);
+    }
+}
 
 /// Entry point principale secondo Embassy
 #[embassy_executor::main]
@@ -137,15 +158,19 @@ async fn main(spawner: Spawner) {
     let Pio {
         // destrutturazione per prendere solo quello che serve
         mut common,
-        irq3,
         mut sm2,
         ..
     } = Pio::new(pio1, IrqPIO1);
 
     pio::setup_pio_task_sm2(&mut common, &mut sm2);
 
-    spawner.must_spawn(pio::pio_task_sm2(irq3, sm2)); //<---- esempio di task con PIO1 e interrupt
-    panic_led_loop!(control);
+    // Inizializza la variabile statica globale con sm2
+    // sm2 verrà attivata solo durante la generazione dell'HTML
+    let sm2_ref = make_static!(
+        Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>,
+        Mutex::new(sm2)
+    );
+    set_shared_sm2(sm2_ref);
 
     control.init(clm).await;
     control
