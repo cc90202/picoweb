@@ -83,25 +83,29 @@ bind_interrupts!(struct IrqPIO1 {
 #[derive(Clone, Copy)]
 pub struct SharedControl(&'static Mutex<CriticalSectionRawMutex, Control<'static>>);
 
+// Alias di tipo per semplificare la gestione di SM2
+type Sm2StateMachine = embassy_rp::pio::StateMachine<'static, PIO1, 2>;
+type Sm2Mutex = Mutex<CriticalSectionRawMutex, Sm2StateMachine>;
+type Sm2Cell = CsMutex<RefCell<Option<&'static Sm2Mutex>>>;
+
 /// Struttura per condividere la state machine sm2 tra task embassy diversi
 #[derive(Clone, Copy)]
-pub struct SharedSm2(&'static Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>);
+pub struct SharedSm2(&'static Sm2Mutex);
 
 // Variabile statica globale per SharedSm2 usando critical_section::Mutex + RefCell
 // (thread-safe per embedded, no unsafe, no static mut)
-static SHARED_SM2_CELL: CsMutex<RefCell<Option<&'static Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>>>>
-    = CsMutex::new(RefCell::new(None));
+static SHARED_SM2_CELL: Sm2Cell = CsMutex::new(RefCell::new(None));
 
 /// Ottiene il riferimento a SharedSm2 globale in modo thread-safe
 pub fn get_shared_sm2() -> Option<SharedSm2> {
     critical_section::with(|cs| {
-        SHARED_SM2_CELL.borrow(cs).borrow().as_ref().map(|ptr| SharedSm2(*ptr))
+        SHARED_SM2_CELL.borrow(cs).borrow().as_ref().map(|ptr| SharedSm2(ptr))
     })
 }
 
 /// Imposta il riferimento a SharedSm2 globale (da chiamare solo dal main una sola volta)
 /// Panic se viene chiamato più di una volta.
-fn set_shared_sm2(sm2: &'static Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>) {
+fn set_shared_sm2(sm2: &'static Sm2Mutex) {
     critical_section::with(|cs| {
         let mut cell = SHARED_SM2_CELL.borrow(cs).borrow_mut();
         if cell.is_some() {
@@ -175,10 +179,7 @@ async fn main(spawner: Spawner) {
 
     // Inizializza la variabile statica globale con sm2
     // sm2 verrà attivata solo durante la generazione dell'HTML
-    let sm2_ref = make_static!(
-        Mutex<CriticalSectionRawMutex, embassy_rp::pio::StateMachine<'static, PIO1, 2>>,
-        Mutex::new(sm2)
-    );
+    let sm2_ref = make_static!(Sm2Mutex, Mutex::new(sm2));
     set_shared_sm2(sm2_ref);
 
     control.init(clm).await;
